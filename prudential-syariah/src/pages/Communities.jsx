@@ -193,7 +193,7 @@ const Communities = () => {
       {/* TAMPILAN KLASEMEN GLOBAL AGENTS */}
       {activeTab === 'global' && (
         <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden animate-in fade-in duration-300">
-          <div className="p-6 bg-slate-50 border-b border-gray-200"><h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Medal className="w-5 h-5 text-blue-600"/> Peringkat Agen Nasional</h2></div>
+          <div className="p-6 bg-slate-50 border-b border-gray-200"><h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Medal className="w-5 h-5 text-blue-600"/> Peringkat Agen Komunitas Syariah</h2></div>
           <div className="p-6">
             {globalAgents.length === 0 ? <p className="text-center text-gray-500">Belum ada produksi pada periode ini.</p> : (
               <div className="space-y-3">

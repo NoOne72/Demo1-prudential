@@ -2,15 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { 
-  getCurrentUser, getTasks, addTaskDB, toggleTaskStatus, deleteTaskDB, getAgentsByLeader
+  getCurrentUser, getTasks, addTaskDB, toggleTaskStatus, deleteTaskDB, getAgentsByLeader, getAllUsers
 } from '../utils/auth';
 import { 
   CheckCircle2, Circle, Plus, Trash2, ListTodo, User, AlertCircle, 
   ArrowRightCircle, CalendarDays, ChevronLeft, ChevronRight, 
-  BarChart2, CheckSquare, Clock, Activity, Users, Code, Briefcase, X, AlignLeft
+  BarChart2, CheckSquare, Clock, Users, Code, Briefcase, X, AlignLeft
 } from 'lucide-react';
 
-// REVISI: Jam dimulai dari 09:00
 const AVAILABLE_TIME_SLOTS = [
   "09:00 - 10:00", "10:00 - 11:00", "11:00 - 12:00", "12:00 - 13:00", 
   "13:00 - 14:00", "14:00 - 15:00", "15:00 - 16:00", "16:00 - 17:00", 
@@ -23,6 +22,7 @@ const Tasks = () => {
   
   const [tasks, setTasks] = useState([]);
   const [myAgents, setMyAgents] = useState([]);
+  const [leaderName, setLeaderName] = useState(''); // Menyimpan nama Leader untuk Agen
   const [viewMode, setViewMode] = useState('list'); 
   
   // Modals
@@ -48,8 +48,17 @@ const Tasks = () => {
 
   const loadData = () => {
     const allTasks = getTasks();
-    if (isLeader) { setTasks(allTasks.filter(t => t.leaderId === user.agentNumber)); setMyAgents(getAgentsByLeader(user.agentNumber)); } 
-    else { setTasks(allTasks.filter(t => t.agentNumber === user.agentNumber)); }
+    if (isLeader) { 
+      setTasks(allTasks.filter(t => t.leaderId === user?.agentNumber)); 
+      setMyAgents(getAgentsByLeader(user?.agentNumber)); 
+    } else { 
+      // REVISI: Agen kini memuat tugasnya sendiri DITAMBAH jadwal milik Leader
+      setTasks(allTasks.filter(t => t.agentNumber === user?.agentNumber || t.agentNumber === user?.leaderId)); 
+      
+      const allU = getAllUsers();
+      const l = allU.find(u => u.agentNumber === user?.leaderId);
+      if (l) setLeaderName(l.name);
+    }
   };
 
   useEffect(() => { loadData(); }, []);
@@ -79,16 +88,15 @@ const Tasks = () => {
     e.preventDefault();
     if (!newTaskTitle || !dueDate) return;
 
-    let targetAgentNum = user.agentNumber;
+    let targetAgentNum = user?.agentNumber;
     let assignerText = 'Self';
     if (isLeader) {
       if (taskFormType === 'delegate') {
         if (!selectedAgentNum) return alert('Pilih agen!');
-        targetAgentNum = selectedAgentNum; assignerText = `Assigned by Leader (${user.name})`;
-      } else { targetAgentNum = user.agentNumber; assignerText = 'Self'; }
+        targetAgentNum = selectedAgentNum; assignerText = `Assigned by Leader (${user?.name})`;
+      } else { targetAgentNum = user?.agentNumber; assignerText = 'Self'; }
     }
 
-    // REVISI: Gabungkan timeSlots dengan selectedTimeSlot jika belum di-add via tombol "+"
     let finalTimeSlots = [...timeSlots];
     if (selectedTimeSlot && !finalTimeSlots.includes(selectedTimeSlot)) {
       finalTimeSlots.push(selectedTimeSlot);
@@ -98,9 +106,8 @@ const Tasks = () => {
     addTaskDB({
       id: Date.now(), title: newTaskTitle, description: newTaskDesc, 
       priority, status: 'Pending', assigner: assignerText, agentNumber: targetAgentNum, 
-      leaderId: isLeader ? user.agentNumber : user.leaderId, dueDate, 
-      timeSlots: finalTimeSlots, 
-      createdAt: new Date().toISOString()
+      leaderId: isLeader ? user?.agentNumber : user?.leaderId, dueDate, 
+      timeSlots: finalTimeSlots, createdAt: new Date().toISOString()
     });
     
     setNewTaskTitle(''); setNewTaskDesc(''); setTimeSlots([]); setSelectedTimeSlot(''); loadData();
@@ -115,11 +122,18 @@ const Tasks = () => {
     return 'bg-blue-100 text-blue-700 border-blue-200';
   };
   
+  // --- FILTERING TAMPILAN LIST TUGAS ---
   let displayedTasks = tasks.filter(t => {
-    if (!isLeader) return t.agentNumber === user.agentNumber;
-    if (listFilter === 'personal') return t.agentNumber === user.agentNumber;
-    if (listFilter === 'delegated') return t.agentNumber !== user.agentNumber;
-    return true;
+    if (isLeader) {
+      if (listFilter === 'personal') return t.agentNumber === user?.agentNumber;
+      if (listFilter === 'delegated') return t.agentNumber !== user?.agentNumber;
+      return true; // 'all'
+    } else {
+      // Agen: Bisa filter Tugas Pribadi atau Jadwal Leader
+      if (listFilter === 'personal') return t.agentNumber === user?.agentNumber;
+      if (listFilter === 'leader') return t.agentNumber === user?.leaderId;
+      return true; // 'all'
+    }
   });
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -145,8 +159,10 @@ const Tasks = () => {
     return timeA.localeCompare(timeB);
   });
 
-  const totalTasks = displayedTasks.length;
-  const completedTasks = displayedTasks.filter(t => t.status === 'Completed').length;
+  // --- REVISI: Kalkulasi Stats/Rekapan (Hanya hitung tugas Pribadi Agen) ---
+  const myFilteredTasks = displayedTasks.filter(t => t.agentNumber === user?.agentNumber);
+  const totalTasks = myFilteredTasks.length;
+  const completedTasks = myFilteredTasks.filter(t => t.status === 'Completed').length;
   const pendingTasks = totalTasks - completedTasks;
   const progressPercentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
@@ -177,8 +193,10 @@ const Tasks = () => {
 
       {viewMode === 'list' && (
         <div className="space-y-8 animate-in fade-in duration-300">
+          
+          {/* STATS KHUSUS TUGAS PRIBADI */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4"><div className="p-3 bg-blue-50 text-blue-600 rounded-xl"><ListTodo className="w-6 h-6" /></div><div><p className="text-xs font-bold text-gray-400 uppercase">Total Tugas</p><h3 className="text-2xl font-extrabold text-gray-900">{totalTasks}</h3></div></div>
+            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4"><div className="p-3 bg-blue-50 text-blue-600 rounded-xl"><ListTodo className="w-6 h-6" /></div><div><p className="text-xs font-bold text-gray-400 uppercase">Total Tugas Saya</p><h3 className="text-2xl font-extrabold text-gray-900">{totalTasks}</h3></div></div>
             <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4"><div className="p-3 bg-green-50 text-green-600 rounded-xl"><CheckSquare className="w-6 h-6" /></div><div><p className="text-xs font-bold text-gray-400 uppercase">Selesai</p><h3 className="text-2xl font-extrabold text-gray-900">{completedTasks}</h3></div></div>
             <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4"><div className="p-3 bg-orange-50 text-orange-600 rounded-xl"><Clock className="w-6 h-6" /></div><div><p className="text-xs font-bold text-gray-400 uppercase">Tertunda</p><h3 className="text-2xl font-extrabold text-gray-900">{pendingTasks}</h3></div></div>
             <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-center relative overflow-hidden"><div className="flex justify-between items-end mb-2"><p className="text-xs font-bold text-gray-400 uppercase">Progress</p><span className={`text-lg font-extrabold ${progressPercentage === 100 ? 'text-green-600' : 'text-blue-600'}`}>{progressPercentage}%</span></div><div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden shadow-inner"><div className={`h-2.5 rounded-full transition-all duration-1000 ${progressPercentage === 100 ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${progressPercentage}%` }}></div></div></div>
@@ -240,22 +258,32 @@ const Tasks = () => {
                   ))}
                 </div>
 
-                {isLeader && (
+                {isLeader ? (
                   <div className="flex gap-2">
                     {[{ id: 'all', label: 'All' }, { id: 'personal', label: 'Pribadi' }, { id: 'delegated', label: 'Delegasi' }].map(f => (
                       <button key={f.id} onClick={() => setListFilter(f.id)} className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-colors ${listFilter === f.id ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600'}`}>{f.label}</button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    {[{ id: 'all', label: 'Semua' }, { id: 'personal', label: 'Tugas Saya' }, { id: 'leader', label: 'Jadwal Leader' }].map(f => (
+                      <button key={f.id} onClick={() => setListFilter(f.id)} className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-colors ${listFilter === f.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600'}`}>{f.label}</button>
                     ))}
                   </div>
                 )}
               </div>
 
               {displayedTasks.length === 0 ? (
-                <div className="bg-white rounded-2xl border-dashed border border-gray-200 p-12 text-center"><ListTodo className="w-12 h-12 text-gray-300 mx-auto mb-3" /><p className="text-gray-500">Tidak ada tugas pada filter ini.</p></div>
+                <div className="bg-white rounded-2xl border-dashed border border-gray-200 p-12 text-center"><ListTodo className="w-12 h-12 text-gray-300 mx-auto mb-3" /><p className="text-gray-500">Tidak ada data pada filter ini.</p></div>
               ) : (
                 displayedTasks.map(task => {
                   const isCompleted = task.status === 'Completed';
-                  const isPersonal = isLeader && task.agentNumber === user.agentNumber;
-                  const canToggle = !isLeader || isPersonal;
+                  const isPersonal = task.agentNumber === user?.agentNumber;
+                  const isLeaderTaskForAgent = !isLeader && task.agentNumber === user?.leaderId;
+                  
+                  // REVISI: Hanya pemilik tugas yang bisa men-checklist atau menghapus
+                  const canToggle = isPersonal; 
+                  const canDelete = isLeader ? true : isPersonal; 
                   const isHighlighted = task.id === highlightedTaskId;
 
                   return (
@@ -271,7 +299,9 @@ const Tasks = () => {
                           : 'border-gray-200 hover:border-blue-400 hover:shadow-md'
                       }`}
                     >
-                      <button onClick={(e) => { e.stopPropagation(); canToggle && handleToggle(task.id); }} className={`mt-1 shrink-0 ${!canToggle ? 'cursor-default' : 'hover:scale-110 transition-transform'}`}>{isCompleted ? <CheckCircle2 className="w-6 h-6 text-green-600" /> : <Circle className="w-6 h-6 text-gray-300" />}</button>
+                      <button onClick={(e) => { e.stopPropagation(); canToggle && handleToggle(task.id); }} className={`mt-1 shrink-0 ${!canToggle ? 'cursor-default opacity-40' : 'hover:scale-110 transition-transform'}`}>
+                        {isCompleted ? <CheckCircle2 className="w-6 h-6 text-green-600" /> : <Circle className="w-6 h-6 text-gray-300" />}
+                      </button>
                       <div className="flex-1">
                         <div className="flex flex-wrap gap-2 mb-1.5">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${getPriorityStyle(task.priority)}`}>{task.priority}</span>
@@ -283,12 +313,19 @@ const Tasks = () => {
                              </span>
                           )}
 
+                          {/* PENANDA TUGAS LEADER / DELEGASI */}
                           {isLeader && <span className={`text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 border ${isPersonal ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{isPersonal ? <Briefcase className="w-3 h-3" /> : <User className="w-3 h-3" />} {isPersonal ? 'Tugas Pribadi' : myAgents.find(a => a.agentNumber === task.agentNumber)?.name}</span>}
+                          
+                          {/* BADGE JADWAL LEADER KHUSUS AGEN */}
+                          {isLeaderTaskForAgent && <span className="text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 border bg-slate-100 text-slate-600 border-slate-300 border-dashed"><AlertCircle className="w-3 h-3" /> Jadwal Leader</span>}
                         </div>
                         <h3 className={`font-semibold text-base ${isCompleted ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{task.title}</h3>
                         {task.description && <p className="text-xs text-gray-500 mt-1 line-clamp-1">{task.description}</p>}
                       </div>
-                      <button onClick={(e) => { e.stopPropagation(); handleDelete(task.id); }} className="p-2 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-5 h-5" /></button>
+                      
+                      {canDelete && (
+                        <button onClick={(e) => { e.stopPropagation(); handleDelete(task.id); }} className="p-2 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-5 h-5" /></button>
+                      )}
                     </div>
                   )
                 })
@@ -322,7 +359,7 @@ const Tasks = () => {
                   return (
                     <div 
                       key={d} 
-                      onClick={() => setDailyScheduleModal(dateStr)} // MUNCULKAN RINGKASAN HARIAN
+                      onClick={() => setDailyScheduleModal(dateStr)} 
                       className={`min-h-[120px] rounded-2xl p-3 flex flex-col border border-transparent cursor-pointer transition-all ${isToday ? 'bg-indigo-50/50 border-indigo-200 hover:bg-indigo-100/50' : 'bg-slate-50 hover:border-blue-300 hover:shadow-sm'}`}
                     >
                       <div className="mb-2"><span className={`text-sm font-bold flex items-center justify-center w-8 h-8 rounded-full ${isToday ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-700'}`}>{d}</span></div>
@@ -330,7 +367,12 @@ const Tasks = () => {
                       <div className="flex-1 space-y-1.5 overflow-y-auto scrollbar-hide">
                         {dayTasks.map(t => {
                           let style = 'bg-white border-gray-200 text-gray-700'; 
-                          if (isLeader) style = (t.agentNumber === user.agentNumber) ? 'bg-purple-50 text-purple-800 border-purple-200' : 'bg-blue-50 text-blue-800 border-blue-200';
+                          if (isLeader) {
+                            style = (t.agentNumber === user?.agentNumber) ? 'bg-purple-50 text-purple-800 border-purple-200' : 'bg-blue-50 text-blue-800 border-blue-200';
+                          } else {
+                            // Style khusus Leader di kalender Agen
+                            if (t.agentNumber === user?.leaderId) style = 'bg-slate-50 text-slate-500 border-slate-300 border-dashed opacity-80';
+                          }
                           if (t.status === 'Completed') style = 'opacity-50 bg-gray-50 text-gray-400 line-through border-gray-100';
                           
                           return (
@@ -339,7 +381,6 @@ const Tasks = () => {
                               onClick={(e) => { e.stopPropagation(); setSelectedTaskModal(t); }} 
                               className={`flex items-center gap-1.5 text-[10px] font-bold px-2 py-1.5 rounded-lg border shadow-sm truncate hover:scale-[1.02] transition-transform ${style}`}
                             >
-                               {/* REVISI: Jam Dihilangkan dari Display Kalender */}
                                <span className="truncate">{t.title}</span>
                             </div>
                           )
@@ -353,7 +394,7 @@ const Tasks = () => {
           </div>
           
           <div className="lg:col-span-1 space-y-6">
-            <div className="bg-white rounded-3xl p-6 border border-gray-100"><h3 className="font-bold text-lg mb-6">Summary</h3><div className="flex justify-between items-end mb-4"><div className="flex items-baseline gap-2"><span className="text-5xl font-extrabold text-indigo-600">{pendingTasks}</span><span className="text-sm text-gray-400 font-bold uppercase">Active</span></div><span className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full text-xs font-extrabold">{progressPercentage}% Done</span></div><div className="w-full bg-slate-100 h-2.5 rounded-full"><div className="bg-emerald-500 h-full rounded-full" style={{width: `${progressPercentage}%`}}></div></div></div>
+            <div className="bg-white rounded-3xl p-6 border border-gray-100"><h3 className="font-bold text-lg mb-6">Week Summary</h3><div className="flex justify-between items-end mb-4"><div className="flex items-baseline gap-2"><span className="text-5xl font-extrabold text-indigo-600">{pendingTasks}</span><span className="text-sm text-gray-400 font-bold uppercase">Active</span></div><span className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full text-xs font-extrabold">{progressPercentage}% Done</span></div><div className="w-full bg-slate-100 h-2.5 rounded-full"><div className="bg-emerald-500 h-full rounded-full" style={{width: `${progressPercentage}%`}}></div></div></div>
             
             <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 h-[calc(75vh-200px)] flex flex-col">
                <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-lg text-slate-900">Upcoming</h3><AlertCircle className="w-5 h-5 text-orange-500" /></div>
@@ -366,6 +407,8 @@ const Tasks = () => {
                      return timeA.localeCompare(timeB);
                   }).slice(0, 5).map(task => {
                     const isOverdue = new Date(task.dueDate) < new Date(new Date().setHours(0,0,0,0));
+                    const isLeaderTaskForAgent = !isLeader && task.agentNumber === user?.leaderId;
+
                     return (
                       <div 
                         key={task.id} 
@@ -377,6 +420,8 @@ const Tasks = () => {
                           <div className="flex gap-2 mt-1">
                              <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase inline-block ${getPriorityStyle(task.priority)}`}>{task.priority}</span>
                              {task.timeSlots?.length > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">{task.timeSlots[0].split('-')[0]}</span>}
+                             {/* Tanda Jadwal Leader */}
+                             {isLeaderTaskForAgent && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-dashed border-slate-300">LEADER</span>}
                           </div>
                         </div>
                         <div className="text-right shrink-0">
@@ -415,28 +460,36 @@ const Tasks = () => {
 
                   return (
                     <div className="relative border-l-2 border-blue-200 ml-3 pl-6 space-y-6">
-                      {dayT.map(t => (
-                        <div key={t.id} className="relative group">
-                           {/* Titik Timeline */}
-                           <div className="absolute -left-[31px] top-1.5 w-3.5 h-3.5 rounded-full border-2 border-white bg-blue-500 group-hover:scale-125 transition-transform"></div>
-                           
-                           {/* Kartu Tugas */}
-                           <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-blue-300 cursor-pointer transition-all" onClick={() => setSelectedTaskModal(t)}>
-                              <div className="flex flex-wrap gap-2 items-center mb-2">
-                                <span className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded flex items-center gap-1">
-                                  <Clock className="w-3 h-3"/> {t.timeSlots?.length ? t.timeSlots.join(', ') : 'Sepanjang Hari'}
-                                </span>
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${t.status === 'Completed' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-orange-100 text-orange-700 border-orange-200'}`}>{t.status}</span>
-                              </div>
-                              <h5 className="font-bold text-gray-900 text-sm">{t.title}</h5>
-                              {t.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{t.description}</p>}
-                              
-                              {isLeader && t.agentNumber !== user.agentNumber && (
-                                <div className="mt-2 text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded inline-block">Agen: {myAgents.find(a=>a.agentNumber===t.agentNumber)?.name}</div>
-                              )}
-                           </div>
-                        </div>
-                      ))}
+                      {dayT.map(t => {
+                        const isLeaderTaskForAgent = !isLeader && t.agentNumber === user?.leaderId;
+                        
+                        return (
+                          <div key={t.id} className="relative group">
+                             <div className="absolute -left-[31px] top-1.5 w-3.5 h-3.5 rounded-full border-2 border-white bg-blue-500 group-hover:scale-125 transition-transform"></div>
+                             <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-blue-300 cursor-pointer transition-all" onClick={() => setSelectedTaskModal(t)}>
+                                <div className="flex flex-wrap gap-2 items-center mb-2">
+                                  <span className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded flex items-center gap-1">
+                                    <Clock className="w-3 h-3"/> {t.timeSlots?.length ? t.timeSlots.join(', ') : 'Sepanjang Hari'}
+                                  </span>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${t.status === 'Completed' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-orange-100 text-orange-700 border-orange-200'}`}>{t.status}</span>
+                                </div>
+                                <h5 className="font-bold text-gray-900 text-sm">{t.title}</h5>
+                                {t.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{t.description}</p>}
+                                
+                                {isLeader && t.agentNumber !== user?.agentNumber && (
+                                  <div className="mt-2 text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded inline-block">Agen: {myAgents.find(a=>a.agentNumber===t.agentNumber)?.name}</div>
+                                )}
+                                
+                                {/* INDIKATOR JADWAL LEADER DI TIMELINE AGEN */}
+                                {isLeaderTaskForAgent && (
+                                  <div className="mt-2 text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded border border-dashed border-slate-300 inline-block">
+                                    Jadwal Leader ({leaderName})
+                                  </div>
+                                )}
+                             </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   );
                })()}
@@ -468,14 +521,18 @@ const Tasks = () => {
                   <span className="text-xs text-gray-500 font-bold uppercase flex items-center gap-1.5"><CalendarDays className="w-4 h-4 text-orange-500"/> Tanggal</span>
                   <span className="text-sm font-bold text-gray-900">{new Date(selectedTaskModal.dueDate).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'})}</span>
                 </div>
-                {/* REVISI: Penambahan Waktu Jam di dalam Card */}
                 <div className="flex justify-between items-center border-b border-dashed border-gray-200 pb-2">
                   <span className="text-xs text-gray-500 font-bold uppercase flex items-center gap-1.5"><Clock className="w-4 h-4 text-blue-500"/> Waktu / Jam</span>
                   <span className="text-sm font-bold text-gray-900">{selectedTaskModal.timeSlots?.length ? selectedTaskModal.timeSlots.join(', ') : 'Sepanjang Hari'}</span>
                 </div>
                 <div className="flex justify-between items-center border-b border-dashed border-gray-200 pb-2">
                   <span className="text-xs text-gray-500 font-bold uppercase flex items-center gap-1.5"><User className="w-4 h-4 text-blue-500"/> Ditugaskan Kepada</span>
-                  <span className="text-sm font-bold text-gray-900">{selectedTaskModal.agentNumber === user.agentNumber ? 'Anda Pribadi' : myAgents.find(a => a.agentNumber === selectedTaskModal.agentNumber)?.name}</span>
+                  <span className="text-sm font-bold text-gray-900">
+                    {selectedTaskModal.agentNumber === user?.agentNumber ? 'Anda Pribadi' : 
+                     isLeader ? myAgents.find(a => a.agentNumber === selectedTaskModal.agentNumber)?.name : 
+                     `Leader (${leaderName})`
+                    }
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-gray-500 font-bold uppercase flex items-center gap-1.5"><AlertCircle className="w-4 h-4 text-slate-500"/> Dibuat Oleh</span>

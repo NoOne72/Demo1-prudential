@@ -1,5 +1,5 @@
 // src/App.jsx
-import React from 'react';
+import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { getCurrentUser } from './utils/auth';
 
@@ -27,12 +27,17 @@ const PrivateRoute = ({ children, allowedRoles }) => {
 };
 
 function App() {
-  const user = getCurrentUser();
+  // 🔥 FIX 1: Jadikan user sebagai State agar aplikasi menyadari jika ada perubahan (login/logout)
+  const [user, setUser] = useState(getCurrentUser());
 
   return (
     <Router>
       <Routes>
-        <Route path="/login" element={<Login />} />
+        {/* 🔥 FIX 2: Kirim fungsi setUser ke prop onLogin. 
+            Jika user sudah login, arahkan langsung ke root '/' */}
+        <Route path="/login" element={
+          !user ? <Login onLogin={(userData) => setUser(userData)} /> : <Navigate to="/" />
+        } />
         
         {/* Auto Redirect Root ke Halaman yang Sesuai Role */}
         <Route path="/" element={
